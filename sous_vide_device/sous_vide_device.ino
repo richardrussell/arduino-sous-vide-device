@@ -23,33 +23,35 @@
 // DS18B20 Temperature sensor
 #define DS18B20_PIN 8
 
-// Thermistor is on Analog 1
+// Thermistor is on Analog 1 - this should likely be set to 3.3V
 #define THERMISTOR_PIN 1
 
-// TMP36 (ambient) is on Analog 2
+// TMP36 (ambient) is on Analog 2 - this may need resetting to 3.3V
 #define TMP36_PIN 2
 
 // Thermistor definitions
 // resistance at 25 degrees C
 #define THERMISTORNOMINAL 10000      
+
 // temp. for nominal resistance (almost always 25 C)
 #define TEMPERATURENOMINAL 25   
+
 // how many samples to take and average, more takes longer
 // but is more 'smooth'
 #define NUMSAMPLES 5
+
 // The beta coefficient of the thermistor (usually 3000-4000)
 #define BCOEFFICIENT 3950
+
 // the value of the 'other' resistor
 #define SERIESRESISTOR 10000    
 
-
-
-
-const float voltage = 4.91;                       // only used for display purposes, if used
-                                        // set to the measured Vcc.
-const float thermistor_resistor = 9850;                       // balance/pad resistor value, set this to
-                                        // the measured resistance of your pad resistor
-const float thermistor_resistance = 10000;                   // thermistor nominal resistance
+int  resolution = 12;
+unsigned long lastTempRequest = 0;
+int  delayInMillis = 0;
+float temperature = 0.0;
+int  idle = 0;
+DeviceAddress tempDeviceAddress;
 
 
 // initialize the library with the numbers of the interface pins
@@ -65,10 +67,10 @@ int relayState=LOW;
 
 
 //Define Variables we'll be connecting to
-double Setpoint = 25.0, Input, Output;
+double Setpoint = 55.0, Input, Output;
 
 //Specify the links and initial tuning parameters
-PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
+PID myPID(&Input, &Output, &Setpoint, 20, 5, 1, DIRECT);
 
 int WindowSize = 5000; // PWM lentgh for relay (in ms)
 
@@ -77,8 +79,18 @@ unsigned long windowStartTime;
 
 
 float getSensorTemp() {
-  sensors.requestTemperatures();  // Send the command to get temperatures
-  return sensors.getTempCByIndex(0); // Why "byIndex"? You can have more than one IC on the same bus. 0 refers to the first IC on the wire
+  if (millis() - lastTempRequest >= delayInMillis) // waited long enough??
+  {
+    temperature = sensors.getTempCByIndex(0);
+    sensors.requestTemperatures(); 
+    delayInMillis = 750 / (1 << (12 - resolution));
+    lastTempRequest = millis(); 
+  }
+  
+  
+//  sensors.requestTemperatures();  // Send the command to get temperatures
+  return temperature;
+//  return sensors.getTempCByIndex(0); // Why "byIndex"? You can have more than one IC on the same bus. 0 refers to the first IC on the wire
 }
 
 float getThermistorTemp() {
@@ -132,6 +144,14 @@ void setup() {
 
   // Start up the onewire library
   sensors.begin(); // IC Default 9 bit. If you have troubles consider upping it 12. Ups the delay giving the IC more time to process the temperature measurement
+  sensors.getAddress(tempDeviceAddress, 0);
+  sensors.setResolution(tempDeviceAddress, resolution);
+  
+  sensors.setWaitForConversion(false);
+  sensors.requestTemperatures();
+  delayInMillis = 750 / (1 << (12 - resolution)); 
+  lastTempRequest = millis(); 
+
   Serial.begin(9600);
   Serial.println("hello serial monitor!");
   pinMode(BUTTON1_PIN, INPUT);
@@ -151,7 +171,8 @@ void setup() {
   // set up the LCD's number of columns and rows: 
   lcd.begin(16, 2);
   // Print a message to the LCD.
-  lcd.print("hello, world!");
+  lcd.println("hello, world!");
+//  lcd.println(getThermistorTemp());
   delay(1000);
   lcd.clear();
 }
@@ -183,13 +204,12 @@ void loop() {
   lcd.print(relayState);
   lcd.print(" ");
   lcd.print(button1_state);
-  lcd.print(" ");
   lcd.print(button2_state);
-  lcd.print(" ");
   lcd.print(button3_state);
   lcd.print("    ");
 
-  Input = (sensorTemp+thermistorTemp)/2;
+//  Input = (sensorTemp+thermistorTemp)/2;
+  Input = thermistorTemp;
   myPID.Compute();
 
   /************************************************
@@ -200,8 +220,9 @@ void loop() {
   { //time to shift the Relay Window
     windowStartTime += WindowSize;
   }
-  if(Output > now - windowStartTime) digitalWrite(RELAY_PIN,HIGH);
-  else digitalWrite(RELAY_PIN,LOW);
+  if(Output > now - windowStartTime) relayState=HIGH;
+  else relayState=LOW;
+  digitalWrite(RELAY_PIN,relayState);
 }
 
 
